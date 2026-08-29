@@ -164,6 +164,21 @@ table.ft input,table.ft select{min-height:40px;padding:7px 9px;}
   padding:3px 8px;border-radius:2px;}
 #gatelist li.done{background:var(--ok-bg);color:var(--ok);}
 
+/* focused (essentials-first) view */
+[hidden]{display:none !important;}
+.viewbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 14px;font-size:12px;color:var(--ink-sub);}
+.viewbar .vbtn{font:inherit;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;cursor:pointer;
+  background:none;border:1px solid var(--rule);border-radius:2px;color:var(--ink-sub);padding:6px 12px;}
+.viewbar .vbtn.on{background:var(--ink);color:var(--paper);border-color:var(--ink);}
+.viewbar .vnote{font-family:var(--serif);font-style:italic;color:var(--ink-muted);}
+.morebtn{font:inherit;font-size:11px;letter-spacing:1.2px;text-transform:uppercase;cursor:pointer;
+  background:none;border:1px dashed var(--rule);border-radius:2px;color:var(--accent);padding:7px 12px;margin:6px 0 14px;display:block;}
+.morebtn:hover{border-color:var(--accent);}
+#gatelist li:not(.done){cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;}
+#gatelist li:not(.done):hover{color:var(--accent);}
+@keyframes shiflash{0%{background:var(--accent-light);}100%{background:transparent;}}
+.flash{animation:shiflash 1.8s ease-out;}
+
 /* export */
 #exportbox{width:100%;min-height:320px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   font-size:12px;line-height:1.5;white-space:pre;}
@@ -267,6 +282,14 @@ table.ft input,table.ft select{min-height:40px;padding:7px 9px;}
   <button role="tab" aria-selected="false" data-go="partC">Part C &middot; Problem list</button>
   <button role="tab" aria-selected="false" data-go="partD">Handoff export</button>
 </nav>
+
+<!-- Focused / full view toggle -->
+<div class="viewbar noprint">
+  <span>View:</span>
+  <button type="button" class="vbtn" id="viewFocused">Focused</button>
+  <button type="button" class="vbtn" id="viewFull">Full form</button>
+  <span class="vnote">Focused shows only the fields that change the report's numbers — expand any section for the rest. Printing always prints the full form.</span>
+</div>
 
 <!-- Saved-draft resume banner (drafts autosave to this browser between the two sittings) -->
 <div id="resumeBanner" class="note noprint" style="display:none;margin:0 0 14px"></div>
@@ -2295,6 +2318,143 @@ $('#dockSubmit').addEventListener('click', doSubmit);
 document.addEventListener('input', function(){
   _submitBtns.forEach(function(b){ if(b && b.disabled && b.textContent==='Submitted ✓'){ b.disabled=false; b.textContent='Submit to SHI'; } });
 });
+
+/* ── Essentials-first (focused) view ──
+   Default shows only the fields that change the report's numbers: the 18
+   data-gate fields plus the allowlist below. Everything else is hidden until
+   the section's "Show full section" button (or the Full-form toggle) reveals
+   it. Fields that HOLD A VALUE (prefill, draft, import, typing) are never
+   hidden, and printing always prints the full form. */
+var ESSENTIAL_NAMES = {
+  name:1, ghc_id:1, age:1, dob:1, sex:1, package_tier:1, tier_confirmed:1,
+  report_date:1, sample_date_actual:1, reason:1, call_date:1,
+  weight:1, height:1, waist:1, sbp:1, dbp:1, hr:1, spo2:1,
+  current_medications:1, drugflag:1, med_started:1, inr_target:1,
+  fh_cvd_detail:1, ecg_done:1, problem_list:1,
+  physician:1, slmc:1, signed_date:1
+};
+var units = [];
+(function collectUnits(){
+  var seen = [];
+  $$('.part input, .part select, .part textarea').forEach(function(ctl){
+    var u = ctl.closest('.f') || ctl.closest('.chk3') || ctl.closest('.opts') || ctl.closest('tr');
+    if(!u || seen.indexOf(u) >= 0) return;
+    seen.push(u);
+    if(u.closest('#partD') || u.closest('#intakeSec') || u.closest('.qn') || u.closest('.dock')) return;
+    if(u.querySelector('[data-gate]')) return;
+    var cs = u.querySelectorAll('input,select,textarea');
+    for(var i=0;i<cs.length;i++){ if(ESSENTIAL_NAMES[cs[i].name]) return; }
+    /* conditional wrappers (display:none until relevant, e.g. cigarettes/day
+       once smoking=current) only appear when they matter — never focus-hide */
+    if(u.style.display === 'none') return;
+    u._sec = u.closest('section.blk');
+    u.classList.add('fu');
+    units.push(u);
+  });
+})();
+function unitHasValue(u){
+  var cs = u.querySelectorAll('input,select,textarea');
+  for(var i=0;i<cs.length;i++){
+    var c = cs[i];
+    if(c.type==='checkbox' || c.type==='radio'){ if(c.checked) return true; }
+    else if(c.value && String(c.value).trim() !== '') return true;
+  }
+  return false;
+}
+var viewMode = 'focused';
+try{ viewMode = localStorage.getItem('shi_f3_view') || 'focused'; }catch(e){}
+var printing = false;
+function unitVisible(u){ return !u.hidden && u.style.display !== 'none'; }
+function applyView(){
+  var focused = viewMode === 'focused' && !printing;
+  units.forEach(function(u){
+    u.hidden = focused && !(u._sec && u._sec.dataset.exp) && !unitHasValue(u);
+  });
+  $$('.part section.blk').forEach(function(sec){
+    if(sec.closest('#partD')) return;
+    /* container rails / tables / sub-headings with nothing visible fold away */
+    $$('.grid, .ippa, table', sec).forEach(function(g){
+      var fs = $$('.fu', g);
+      if(!fs.length || $$('.qn', g).length){ g.hidden = false; return; }
+      var essFields = $$('.f, .chk3, .opts, tr', g).filter(function(x){ return !x.classList.contains('fu') && x.querySelector && x.querySelector('input,select,textarea'); });
+      g.hidden = focused && !fs.some(unitVisible) && !essFields.length;
+    });
+    $$('h3.sub', sec).forEach(function(h){
+      if(!focused){ h.hidden = false; return; }
+      var vis = false, n = h.nextElementSibling;
+      while(n && !n.matches('h3.sub')){
+        if(n.matches('.qn') || $$('.qn', n).length){ vis = true; break; }
+        if(!n.hidden){
+          var fs = n.matches('.fu') ? [n] : $$('.fu', n);
+          if(fs.some(unitVisible)){ vis = true; break; }
+          /* essential fields aren't units — a group holding one stays shown */
+          if((n.matches('.f,.chk3,.opts') && !n.matches('.fu')) ||
+             $$('.f, .chk3, .opts', n).some(function(x){ return !x.classList.contains('fu') && !x.hidden && x.style.display !== 'none'; })){ vis = true; break; }
+        }
+        n = n.nextElementSibling;
+      }
+      h.hidden = !vis;
+    });
+    var hiddenCount = 0;
+    units.forEach(function(u){ if(u._sec === sec && u.hidden) hiddenCount++; });
+    var btn = sec.querySelector(':scope > .morebtn');
+    if(hiddenCount || (btn && sec.dataset.exp)){
+      if(!btn){
+        btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'morebtn noprint';
+        btn.addEventListener('click', function(){
+          if(sec.dataset.exp) delete sec.dataset.exp; else sec.dataset.exp = '1';
+          applyView();
+        });
+        sec.appendChild(btn);
+      }
+      btn.hidden = false;
+      btn.textContent = sec.dataset.exp ? 'Show fewer fields' : 'Show full section (' + hiddenCount + ' more)';
+    } else if(btn){ btn.hidden = true; }
+  });
+  var bf = $('#viewFocused'), bl = $('#viewFull');
+  if(bf) bf.classList.toggle('on', viewMode === 'focused');
+  if(bl) bl.classList.toggle('on', viewMode !== 'focused');
+}
+function setView(m){
+  viewMode = m;
+  try{ localStorage.setItem('shi_f3_view', m); }catch(e){}
+  applyView();
+}
+if($('#viewFocused')) $('#viewFocused').addEventListener('click', function(){ setView('focused'); });
+if($('#viewFull')) $('#viewFull').addEventListener('click', function(){ setView('full'); });
+window.addEventListener('beforeprint', function(){ printing = true; applyView(); });
+window.addEventListener('afterprint', function(){ printing = false; applyView(); });
+
+/* ── clickable missing-gates list: jump straight to the blank field ── */
+var GATE_FIELD = {
+  'Name':'name', 'Age':'age', 'Sex':'sex', 'Systolic BP':'sbp', 'Diastolic BP':'dbp',
+  'Smoking status':'smoking', 'Diabetes status':'dm', 'On antihypertensive':'on_bp_med',
+  'On statin':'on_statin', 'Family history of premature CVD':'fh_cvd', 'Weight':'weight',
+  'Height':'height', 'Waist':'waist', 'Fasting status':'fasted', 'Acute illness':'acute_ill',
+  'Weight loss asked':'sx_wtloss', 'Menopausal status':'menopause', 'Pregnancy status':'pregnant'
+};
+function jumpToGate(k){
+  var nm = GATE_FIELD[k]; if(!nm) return;
+  var el = document.getElementsByName(nm)[0]; if(!el) return;
+  var part = el.closest('.part'); if(part) goTab(part.id);
+  var wrap = el.closest('.f') || el.closest('.chk3') || el.closest('.opts') || el;
+  wrap.hidden = false;
+  setTimeout(function(){
+    wrap.scrollIntoView({ behavior:'smooth', block:'center' });
+    try{ el.focus({ preventScroll:true }); }catch(e){}
+    wrap.classList.remove('flash'); void wrap.offsetWidth; wrap.classList.add('flash');
+  }, 60);
+}
+function enhanceGateList(){
+  $$('#gatelist li').forEach(function(li){
+    if(li.className === 'done') return;
+    li.title = (li.title ? li.title + ' — ' : '') + 'Click to jump to this field.';
+    li.onclick = function(){ jumpToGate(li.textContent); };
+  });
+}
+var baseRecalc = recalc;
+recalc = function(){ baseRecalc(); enhanceGateList(); applyView(); };
 
 prefillFromParams();
 showResumeBanner();
