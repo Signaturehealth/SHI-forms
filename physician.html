@@ -179,6 +179,12 @@ table.ft input,table.ft select{min-height:40px;padding:7px 9px;}
 @keyframes shiflash{0%{background:var(--accent-light);}100%{background:transparent;}}
 .flash{animation:shiflash 1.8s ease-out;}
 
+/* offline-fallback fold */
+#fallbackFold{margin-top:18px;border-top:1px solid var(--rule-soft);padding-top:12px;}
+#fallbackFold > summary{cursor:pointer;font-size:11px;letter-spacing:1.6px;text-transform:uppercase;
+  color:var(--ink-sub);padding:6px 0;list-style-position:outside;}
+#fallbackFold > summary:hover{color:var(--accent);}
+
 /* export */
 #exportbox{width:100%;min-height:320px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   font-size:12px;line-height:1.5;white-space:pre;}
@@ -1322,11 +1328,11 @@ table.ft input,table.ft select{min-height:40px;padding:7px 9px;}
 <!-- ══════════════════ PART D ══════════════════ -->
 <div class="part" id="partD">
 <div class="partlede">
-  <strong>Handoff.</strong> Press <em>Submit to SHI</em> to file this record into the CRM — it is stored against
+  <strong>Handoff.</strong> Check the list below, then press <em>Submit to SHI</em> — the record is stored against
   the patient's enrolment, the documents checklist ticks itself, an archival PDF is filed in their Drive folder,
-  and the report pipeline reads it automatically. The Build / Copy / Download buttons produce the same JSON for
-  pasting into the lab report skill directly, or as an offline fallback if the submit fails.
-  The key names match the skill's own contract, so nothing has to be re-read from prose or handwriting.
+  and the report pipeline reads it automatically. Nothing else is needed.
+  The fold at the bottom holds the manual JSON copy (for an offline fallback or for pasting into the lab report
+  skill directly) and the progress file for finishing the form on another device.
 </div>
 <section class="blk">
   <h2 class="sec"><span class="num">D1</span> Completeness</h2>
@@ -1334,20 +1340,30 @@ table.ft input,table.ft select{min-height:40px;padding:7px 9px;}
   <div class="note" id="gateNote"></div>
 </section>
 <section class="blk" id="exportpane">
-  <h2 class="sec"><span class="num">D2</span> Structured export</h2>
+  <h2 class="sec"><span class="num">D2</span> File this record</h2>
   <div class="btnrow">
     <button type="button" class="btn primary" id="btnSubmit">Submit to SHI</button>
-    <button type="button" class="btn" id="btnBuild">Build handoff</button>
-    <button type="button" class="btn" id="btnCopy">Copy to clipboard</button>
-    <button type="button" class="btn" id="btnDownload">Download .json</button>
-    <button type="button" class="btn" id="btnPrint">Print / save as PDF</button>
-    <button type="button" class="btn" id="btnSaveDraft">Save progress file</button>
-    <label class="btn" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
-      Load progress file<input type="file" id="draftFile" accept=".json,application/json" style="display:none"></label>
-    <button type="button" class="btn" id="btnClear">Clear form</button>
   </div>
   <div id="submitStatus" class="note" style="display:none"></div>
-  <textarea id="exportbox" spellcheck="false" placeholder="Press Build handoff."></textarea>
+
+  <details id="fallbackFold">
+    <summary>Offline fallback, progress file &amp; tools</summary>
+    <p class="sechint" style="margin-top:10px">
+      The JSON below is the same record the submit sends. Copy or download it if the submit cannot reach SHI, or to
+      paste into the lab report skill by hand. <em>Save progress file</em> carries an unfinished form to another
+      device — on this device the form saves itself and offers to resume.
+    </p>
+    <div class="btnrow">
+      <button type="button" class="btn" id="btnCopy">Copy to clipboard</button>
+      <button type="button" class="btn" id="btnDownload">Download .json</button>
+      <button type="button" class="btn" id="btnSaveDraft">Save progress file</button>
+      <label class="btn" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
+        Load progress file<input type="file" id="draftFile" accept=".json,application/json" style="display:none"></label>
+      <button type="button" class="btn" id="btnPrint">Print / save as PDF</button>
+      <button type="button" class="btn" id="btnClear">Clear form</button>
+    </div>
+    <textarea id="exportbox" spellcheck="false" placeholder="The record JSON appears here when this section is opened."></textarea>
+  </details>
 </section>
 </div><!-- /partD -->
 
@@ -1358,7 +1374,6 @@ table.ft input,table.ft select{min-height:40px;padding:7px 9px;}
   <div class="bar"><i id="dockBar"></i></div>
   <span class="cnt" id="dockMsg">&mdash;</span>
   <button type="button" id="dockJump">Show what is missing</button>
-  <button type="button" class="primary" id="dockBuild">Build handoff</button>
   <button type="button" class="primary" id="dockSubmit">Submit to SHI</button>
   <span class="cnt" id="dockSaved"></span>
 </div>
@@ -1877,9 +1892,9 @@ function render(){
            + (missing.length ? '// WARNING — still blank: '+missing.map(function(g){return g.k;}).join(', ')+'\n' : '// All risk-distorting fields recorded.\n');
   $('#exportbox').value = head + JSON.stringify(build(), null, 2);
 }
-$('#btnBuild').addEventListener('click', function(){ goTab('partD'); render(); });
-$('#dockBuild').addEventListener('click', function(){ goTab('partD'); render(); });
 $('#dockJump').addEventListener('click', function(){ goTab('partD'); render(); });
+/* the JSON is built on demand — opening the fold, or Copy/Download below */
+$('#fallbackFold').addEventListener('toggle', function(){ if(this.open) render(); });
 $('#btnCopy').addEventListener('click', function(){
   var t=$('#exportbox'); if(!t.value) render();
   t.select(); t.setSelectionRange(0,999999);
@@ -2307,8 +2322,11 @@ function doSubmit(){
       }
     })
     .catch(function(e){
+      /* surface the offline fallback rather than describing it */
+      var fold = $('#fallbackFold');
+      if(fold && !fold.open){ fold.open = true; } else { render(); }
       submitStatus('danger', '<strong>Submission failed</strong> — '+e.message
-        +'. Nothing is lost: the draft is saved on this device, and Copy / Download give you the same JSON as an offline fallback. Check the connection and try again.');
+        +'. Nothing is lost: the draft is saved on this device, and the section below now holds the same record as JSON to copy or download. Check the connection and try again.');
       _submitBtns.forEach(function(b){ if(b){ b.disabled=false; b.textContent='Submit to SHI'; } });
     });
 }
